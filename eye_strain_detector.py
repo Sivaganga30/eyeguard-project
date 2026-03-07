@@ -22,6 +22,8 @@ MAX_BRIGHTNESS = 90
 
 BRIGHTNESS_UPDATE_INTERVAL = 3
 BRIGHTNESS_CHANGE_THRESHOLD = 10
+
+RULE_TIME = 30  # change to 1200 for real 20 minutes
 # ===========================================
 
 
@@ -141,10 +143,13 @@ closed_start = None
 strain_alert = False
 drowsy_alert = False
 
-# Blink variables
 blink_count = 0
 blink_start_time = time.time()
 eye_closed = False
+
+rule_start_time = time.time()
+
+looking_at_screen = False
 
 print("EyeGuard Running")
 
@@ -168,108 +173,130 @@ while cap.isOpened():
 
         face = results.multi_face_landmarks[0]
 
-        ear = (
-            eye_aspect_ratio(face.landmark,LEFT_EYE) +
-            eye_aspect_ratio(face.landmark,RIGHT_EYE)
-        ) / 2
+        # ---------- FACE ORIENTATION CHECK ----------
+        nose = face.landmark[1]
+        left_eye_corner = face.landmark[33]
+        right_eye_corner = face.landmark[263]
 
+        face_center = (left_eye_corner.x + right_eye_corner.x) / 2
 
-        # ---------- BLINK DETECTION ----------
-        if ear < EAR_CLOSED_THRESHOLD:
+        if abs(nose.x - face_center) > 0.05:
 
-            eye_closed = True
+            label = "LOOK AT SCREEN"
+            color = (0,255,255)
 
-        elif ear > EAR_OPEN_THRESHOLD:
-
-            if eye_closed:
-                blink_count += 1
-                eye_closed = False
-
-
-        # ---------- DROWSINESS ----------
-        if ear < EAR_CLOSED_THRESHOLD:
-
-            if closed_start is None:
-                closed_start = time.time()
-
-            closed_time = time.time() - closed_start
-
-            if closed_time > DROWSY_TIME:
-
-                label = "DROWSY"
-                color = (0,0,255)
-
-                if not drowsy_alert:
-
-                    winsound.Beep(1500,500)
-
-                    Thread(target=speak,
-                           args=("You look drowsy. Please wake up.",),
-                           daemon=True).start()
-
-                    drowsy_alert = True
-
-            else:
-
-                label = "EYES CLOSED"
-                color = (0,0,255)
+            looking_at_screen = False
 
             open_start = None
-            strain_alert = False
-
-
-        # ---------- EYE STRAIN ----------
-        elif ear > EAR_OPEN_THRESHOLD:
-
             closed_start = None
+            strain_alert = False
             drowsy_alert = False
 
-            if open_start is None:
-                open_start = time.time()
+        else:
 
-            elapsed = time.time() - open_start
+            looking_at_screen = True
 
-            if elapsed >= STRAIN_TIME:
+            ear = (
+                eye_aspect_ratio(face.landmark,LEFT_EYE) +
+                eye_aspect_ratio(face.landmark,RIGHT_EYE)
+            ) / 2
 
-                label = "EYE STRAIN DETECTED"
-                color = (0,0,255)
 
-                if not strain_alert:
+            # ---------- BLINK DETECTION ----------
+            if ear < EAR_CLOSED_THRESHOLD:
 
-                    winsound.Beep(1000,500)
+                eye_closed = True
 
-                    Thread(target=speak,
-                           args=("Eye strain detected. Please take a break.",),
-                           daemon=True).start()
+            elif ear > EAR_OPEN_THRESHOLD:
 
-                    Thread(target=show_break_popup,daemon=True).start()
+                if eye_closed:
+                    blink_count += 1
+                    eye_closed = False
 
-                    Thread(target=show_eye_exercise,daemon=True).start()
 
-                    strain_alert = True
+            # ---------- DROWSINESS ----------
+            if ear < EAR_CLOSED_THRESHOLD:
 
-            else:
+                if closed_start is None:
+                    closed_start = time.time()
 
-                label = "EYES OPEN"
-                color = (0,255,0)
+                closed_time = time.time() - closed_start
 
+                if closed_time > DROWSY_TIME:
+
+                    label = "DROWSY"
+                    color = (0,0,255)
+
+                    if not drowsy_alert:
+
+                        winsound.Beep(1500,500)
+
+                        Thread(target=speak,
+                               args=("You look drowsy. Please wake up.",),
+                               daemon=True).start()
+
+                        drowsy_alert = True
+
+                else:
+                    label = "EYES CLOSED"
+                    color = (0,0,255)
+
+                open_start = None
                 strain_alert = False
 
 
-        # ---------- BLINK RATE ----------
-        elapsed_time = time.time() - blink_start_time
+            # ---------- EYE STRAIN ----------
+            elif ear > EAR_OPEN_THRESHOLD:
 
-        if elapsed_time >= 0:
+                closed_start = None
+                drowsy_alert = False
 
-            blink_rate = blink_count
-            blink_count = 0
-            blink_start_time = time.time()
+                if open_start is None:
+                    open_start = time.time()
 
-            if blink_rate < 10:
+                elapsed = time.time() - open_start
 
-                Thread(target=speak,
-                       args=("Your blink rate is low. Please blink more often.",),
-                       daemon=True).start()
+                if elapsed >= STRAIN_TIME:
+
+                    label = "EYE STRAIN DETECTED"
+                    color = (0,0,255)
+
+                    if not strain_alert:
+
+                        winsound.Beep(1000,500)
+
+                        Thread(target=speak,
+                               args=("Eye strain detected. Please take a break.",),
+                               daemon=True).start()
+
+                        Thread(target=show_break_popup,daemon=True).start()
+                        Thread(target=show_eye_exercise,daemon=True).start()
+
+                        strain_alert = True
+
+                else:
+                    label = "EYES OPEN"
+                    color = (0,255,0)
+
+                    strain_alert = False
+
+
+            # ---------- BLINK RATE ----------
+            elapsed_time = time.time() - blink_start_time
+
+            if elapsed_time >= 60:
+
+                blink_rate = blink_count
+                blink_count = 0
+                blink_start_time = time.time()
+
+                if blink_rate < 10:
+
+                    winsound.Beep(1200,500)
+
+                    Thread(target=speak,
+                           args=("Your blink rate is low. Please blink more often.",),
+                           daemon=True).start()
 
 
     else:
@@ -277,10 +304,31 @@ while cap.isOpened():
         label = "FACE NOT DETECTED"
         color = (200,200,200)
 
+        looking_at_screen = False
+
         open_start = None
         closed_start = None
         strain_alert = False
         drowsy_alert = False
+
+
+    # ---------- 20-20-20 RULE ----------
+    if looking_at_screen:
+
+        rule_elapsed = time.time() - rule_start_time
+
+        if rule_elapsed >= RULE_TIME:
+
+            winsound.Beep(1200,500)
+
+            Thread(target=speak,
+                   args=("Please follow the twenty twenty twenty rule. Look away from the screen for twenty seconds.",),
+                   daemon=True).start()
+
+            rule_start_time = time.time()
+
+    else:
+        rule_start_time = time.time()
 
 
     # ---------- DISPLAY ----------
@@ -306,10 +354,11 @@ while cap.isOpened():
                     2)
 
     cv2.imshow("EyeGuard Smart Eye Protection",frame)
+    key = cv2.waitKey(1)
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    if key == ord('q') or key == 27:   # q or ESC
+        print("Exiting EyeGuard...")
         break
-
 
 cap.release()
 cv2.destroyAllWindows()
